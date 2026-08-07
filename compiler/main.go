@@ -1,58 +1,126 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 )
 
-type Cube struct {
-	Point  [3]float64 `json:"point"`
-	Normal [3]float64 `json:"normal"`
-	State  bool       `json:"state"`
+type NodeType int
+
+const (
+	NodeVar NodeType = iota
+	NodeAnd
+	NodeOr
+	NodeNot
+)
+
+type Node struct {
+	Type  NodeType
+	Value bool   
+	Left  *Node
+	Right *Node
 }
 
-type Geometry struct {
-	Cubes []Cube `json:"cubes"`
+type Parser struct {
+	tokens []string
+	pos    int
+}
+
+func (p *Parser) peek() string {
+	if p.pos >= len(p.tokens) {
+		return ""
+	}
+	return p.tokens[p.pos]
+}
+
+func (p *Parser) next() string {
+	tok := p.peek()
+	p.pos++
+	return tok
+}
+
+func (p *Parser) parseExpr() *Node {
+	left := p.parseTerm()
+	for p.peek() == "OR" {
+		p.next()
+		right := p.parseTerm()
+		left = &Node{Type: NodeOr, Left: left, Right: right}
+	}
+	return left
+}
+
+func (p *Parser) parseTerm() *Node {
+	left := p.parseFactor()
+	for p.peek() == "AND" {
+		p.next()
+		right := p.parseFactor()
+		left = &Node{Type: NodeAnd, Left: left, Right: right}
+	}
+	return left
+}
+
+func (p *Parser) parseFactor() *Node {
+	tok := p.peek()
+
+	if tok == "NOT" {
+		p.next()
+		inner := p.parseFactor()
+		return &Node{Type: NodeNot, Left: inner}
+	}
+
+	if tok == "(" {
+		p.next()
+		inner := p.parseExpr()
+		if p.peek() == ")" {
+			p.next()
+		}
+		return inner
+	}
+
+	p.next()
+	return &Node{Type: NodeVar, Value: tok == "true"}
+}
+
+func eval(n *Node) bool {
+	switch n.Type {
+	case NodeVar:
+		return n.Value
+	case NodeAnd:
+		return eval(n.Left) && eval(n.Right)
+	case NodeOr:
+		return eval(n.Left) || eval(n.Right)
+	case NodeNot:
+		return !eval(n.Left)
+	}
+	return false
+}
+
+func tokenize(expr string) []string {
+	expr = strings.ReplaceAll(expr, "(", " ( ")
+	expr = strings.ReplaceAll(expr, ")", " ) ")
+	return strings.Fields(expr)
 }
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("usage: compiler \"out = A AND B\"")
+		fmt.Println("usage: compiler \"out = (true AND false) OR NOT false\"")
 		os.Exit(1)
 	}
 
 	expr := os.Args[1]
 	parts := strings.SplitN(expr, "=", 2)
 	if len(parts) != 2 {
-		fmt.Println("invalid expression, expected form: out = A AND B")
+		fmt.Println("invalid expression, expected form: out = <expr>")
 		os.Exit(1)
 	}
 
 	rhs := strings.TrimSpace(parts[1])
-	tokens := strings.Fields(rhs)
+	tokens := tokenize(rhs)
 
-	if len(tokens) != 3 || tokens[1] != "AND" {
-		fmt.Println("only 'A AND B' is supported right now")
-		os.Exit(1)
-	}
+	parser := &Parser{tokens: tokens}
+	tree := parser.parseExpr()
 
-	inputA := tokens[0] == "true"
-	inputB := tokens[2] == "true"
-
-	geometry := Geometry{
-		Cubes: []Cube{
-			{Point: [3]float64{5, 0, 0}, Normal: [3]float64{-1, 1, 0}, State: inputA},
-			{Point: [3]float64{5, 5, 0}, Normal: [3]float64{-1, -1, 0}, State: inputB},
-		},
-	}
-
-	out, err := json.MarshalIndent(geometry, "", "  ")
-	if err != nil {
-		fmt.Println("error encoding json:", err)
-		os.Exit(1)
-	}
-
-	fmt.Println(string(out))
+	result := eval(tree)
+	fmt.Printf("out = %v\n", result)
 }
