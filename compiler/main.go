@@ -178,6 +178,12 @@ func main() {
 	compileNode(tree, &geo)
 
 	geoOut, _ := json.MarshalIndent(geo, "", "  ")
-	fmt.Println(string(geoOut))
+	err := os.WriteFile("../tracer/geometry.json", geoOut, 0644)
+	if err != nil {
+		fmt.Println("error writing geometry.json:", err)
+		os.Exit(1)
+	}
+	fmt.Println("geometry written to tracer/geometry.json")
+	fmt.Printf("expected out = %v\n", result)
 	fmt.Printf("out = %v\n", result)
 }
