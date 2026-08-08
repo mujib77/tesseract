@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"encoding/json"
 )
 
 type NodeType int
@@ -25,6 +26,57 @@ type Node struct {
 type Parser struct {
 	tokens []string
 	pos    int
+}
+
+type Cube struct {
+	Point  [3]float64 `json:"point"`
+	Normal [3]float64 `json:"normal"`
+	State  bool       `json:"state"`
+}
+
+type Geometry struct {
+	Cubes []Cube `json:"cubes"`
+}
+
+var cubeCounter = 0
+
+func compileNode(n *Node, geo *Geometry) {
+	switch n.Type {
+	case NodeVar:
+		return 
+
+	case NodeAnd:
+		compileNode(n.Left, geo)
+		compileNode(n.Right, geo)
+
+		y := float64(cubeCounter) * 5
+		geo.Cubes = append(geo.Cubes, Cube{
+			Point:  [3]float64{5, y, 0},
+			Normal: [3]float64{-1, 1, 0},
+			State:  eval(n.Left),
+		})
+		cubeCounter++
+		geo.Cubes = append(geo.Cubes, Cube{
+			Point:  [3]float64{5, y + 5, 0},
+			Normal: [3]float64{-1, -1, 0},
+			State:  eval(n.Right),
+		})
+		cubeCounter++
+
+	case NodeOr:
+		compileNode(n.Left, geo)
+		compileNode(n.Right, geo)
+		y := float64(cubeCounter) * 5
+		geo.Cubes = append(geo.Cubes, Cube{
+			Point:  [3]float64{5, y, 0},
+			Normal: [3]float64{-1, 1, 0},
+			State:  eval(n.Left) || eval(n.Right),
+		})
+		cubeCounter++
+
+	case NodeNot:
+		compileNode(n.Left, geo)
+	}
 }
 
 func (p *Parser) peek() string {
@@ -122,5 +174,10 @@ func main() {
 	tree := parser.parseExpr()
 
 	result := eval(tree)
+	geo := Geometry{}
+	compileNode(tree, &geo)
+
+	geoOut, _ := json.MarshalIndent(geo, "", "  ")
+	fmt.Println(string(geoOut))
 	fmt.Printf("out = %v\n", result)
 }
