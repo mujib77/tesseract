@@ -1,5 +1,8 @@
 #include <iostream>
 #include <cmath>
+#include <fstream>
+#include <sstream>
+#include <vector>
 
 struct Vec3 {
     double x, y, z;
@@ -31,6 +34,48 @@ struct TransistorCube {
     Vec3 normal;
     bool state; 
 };
+
+std::vector<TransistorCube> loadGeometry(const std::string& path) {
+    std::ifstream file(path);
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    std::string content = buffer.str();
+
+    std::vector<TransistorCube> cubes;
+    size_t pos = 0;
+
+    while ((pos = content.find("\"point\"", pos)) != std::string::npos) {
+        size_t pStart = content.find('[', pos) + 1;
+        size_t pEnd = content.find(']', pStart);
+        std::string pointStr = content.substr(pStart, pEnd - pStart);
+
+        size_t nStart = content.find('[', pEnd) + 1;
+        size_t nEnd = content.find(']', nStart);
+        std::string normalStr = content.substr(nStart, nEnd - nStart);
+
+        size_t sStart = content.find(':', content.find("\"state\"", nEnd)) + 1;
+        size_t sEnd = content.find_first_of(",}", sStart);
+        std::string stateStr = content.substr(sStart, sEnd - sStart);
+
+        auto parseVec3 = [](const std::string& s) {
+            Vec3 v;
+            std::stringstream ss(s);
+            char comma;
+            ss >> v.x >> comma >> v.y >> comma >> v.z;
+            return v;
+        };
+
+        Vec3 point = parseVec3(pointStr);
+        Vec3 normal = parseVec3(normalStr);
+        bool state = stateStr.find("true") != std::string::npos;
+
+        cubes.push_back({point, normal, state});
+
+        pos = sEnd;
+    }
+
+    return cubes;
+}
 
 double intersectPlane(const Ray& ray, const Mirror& mirror) {
     double denom = mirror.normal.dot(ray.direction);
@@ -136,6 +181,24 @@ int main() {
     traceGate(true, false);
     traceGate(false, true);
     traceGate(false, false);
+
+    std::cout << "\n=== Tracing geometry.json ===\n";
+    std::vector<TransistorCube> cubes = loadGeometry("geometry.json");
+    std::cout << "Loaded " << cubes.size() << " cubes\n";
+
+    Ray traceBeam{ {0, 0, 0}, Vec3{1, 0, 0}.normalize() };
+
+    for (size_t i = 0; i < cubes.size(); i++) {
+        double t = intersectTransistor(traceBeam, cubes[i]);
+        if (t < 0) {
+            std::cout << "Cube " << i << ": beam passed through (state=false)\n";
+            continue;
+        }
+        Vec3 hit = traceBeam.origin + traceBeam.direction * t;
+        Vec3 newDir = reflect(traceBeam.direction, cubes[i].normal);
+        std::cout << "Cube " << i << ": HIT at (" << hit.x << ", " << hit.y << ", " << hit.z << "), reflecting\n";
+        traceBeam = { hit, newDir };
+    }
 
     return 0;
 }
