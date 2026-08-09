@@ -13,7 +13,7 @@ const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerH
 camera.position.set(8, 6, 10);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setSize(window.innerWidth, window.innerHeight);  
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.2;
 document.body.appendChild(renderer.domElement);
@@ -46,10 +46,37 @@ const mirrorMat = new THREE.MeshPhysicalMaterial({
   clearcoat: 1.0,
 });
 
-const geo = new THREE.BoxGeometry(2, 2, 2);
-const testCube = new THREE.Mesh(geo, mirrorMat);
-testCube.position.set(5, 0, 0);
-scene.add(testCube);
+async function loadGeometry() {
+  const res = await fetch('geometry.json');
+  const data = await res.json();
+
+  const mirrorMat = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff,
+    metalness: 0.85,
+    roughness: 0.15,
+    clearcoat: 1.0,
+  });
+
+  const glassMat = new THREE.MeshPhysicalMaterial({
+    color: 0x88ccff,
+    metalness: 0.0,
+    roughness: 0.05,
+    transmission: 0.9,
+    transparent: true,
+    opacity: 0.4,
+  });
+
+  const geo = new THREE.BoxGeometry(2, 2, 2);
+
+  data.cubes.forEach(cube => {
+    const mat = cube.state ? mirrorMat : glassMat;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(cube.point[0], cube.point[1], cube.point[2]);
+    scene.add(mesh);
+  });
+}
+
+loadGeometry();
 
 const grid = new THREE.GridHelper(30, 30, 0x330033, 0x110011);
 scene.add(grid);
