@@ -76,7 +76,140 @@ async function loadGeometry() {
   });
 }
 
-loadGeometry();
+async function animateBeam() {
+  const res = await fetch('trace.json');
+  const data = await res.json();
+  const points = data.points.map(p => new THREE.Vector3(p[0], p[1], p[2]));
+
+  const curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0);
+  const material = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 3 });
+
+  const beamGeo = new THREE.BufferGeometry().setFromPoints([points[0]]);
+  const beamLine = new THREE.Line(beamGeo, material);
+  scene.add(beamLine);
+
+  const photonGeo = new THREE.SphereGeometry(0.15, 16, 16);
+  const photonMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+  const photon = new THREE.Mesh(photonGeo, photonMat);
+  scene.add(photon);
+
+  const totalSegments = points.length - 1;
+  const segmentDuration = 1.2;
+  let currentSegment = 0;
+  let segmentStart = performance.now();
+  const drawnPoints = [points[0]];
+
+  function step(now) {
+    const elapsed = (now - segmentStart) / 1000;
+    const t = Math.min(elapsed / segmentDuration, 1);
+
+    const from = points[currentSegment];
+    const to = points[currentSegment + 1];
+    const current = new THREE.Vector3().lerpVectors(from, to, t);
+    photon.position.copy(current);
+
+    const previewPoints = [...drawnPoints, current];
+    beamLine.geometry.dispose();
+    beamLine.geometry = new THREE.BufferGeometry().setFromPoints(previewPoints);
+
+    if (t >= 1) {
+      drawnPoints.push(to);
+      currentSegment++;
+      segmentStart = now;
+      if (currentSegment >= totalSegments) {
+        return; 
+      }
+    }
+
+    requestAnimationFrame(step);
+  }
+
+  requestAnimationFrame(step);
+}
+
+let currentCubes = [];
+let currentMeshes = [];
+
+function clearScene() {
+  currentMeshes.forEach(m => scene.remove(m));
+  currentMeshes = [];
+}
+
+function buildScene(cubes) {
+  clearScene();
+
+  const mirrorMat = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff, metalness: 0.85, roughness: 0.15, clearcoat: 1.0,
+  });
+  const glassMat = new THREE.MeshPhysicalMaterial({
+    color: 0x88ccff, metalness: 0.0, roughness: 0.05, transmission: 0.9, transparent: true, opacity: 0.4,
+  });
+  const geo = new THREE.BoxGeometry(2, 2, 2);
+
+  cubes.forEach(cube => {
+    const mat = cube.state ? mirrorMat : glassMat;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(cube.point[0], cube.point[1], cube.point[2]);
+    scene.add(mesh);
+    currentMeshes.push(mesh);
+  });
+}
+
+function runTrace(expr) {
+  const { cubes, result } = compileExpression(expr);
+  const points = traceGeometry(cubes).map(p => new THREE.Vector3(p[0], p[1], p[2]));
+
+  buildScene(cubes);
+  document.getElementById('resultLabel').textContent = `out = ${result}`;
+  animateBeamFromPoints(points);
+}
+
+function animateBeamFromPoints(points) {
+  const material = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 3 });
+  const beamGeo = new THREE.BufferGeometry().setFromPoints([points[0]]);
+  const beamLine = new THREE.Line(beamGeo, material);
+  scene.add(beamLine);
+  currentMeshes.push(beamLine);
+
+  const photonGeo = new THREE.SphereGeometry(0.15, 16, 16);
+  const photonMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+  const photon = new THREE.Mesh(photonGeo, photonMat);
+  scene.add(photon);
+  currentMeshes.push(photon);
+
+  const totalSegments = points.length - 1;
+  const segmentDuration = 1.2;
+  let currentSegment = 0;
+  let segmentStart = performance.now();
+  const drawnPoints = [points[0]];
+
+  function step(now) {
+    const elapsed = (now - segmentStart) / 1000;
+    const t = Math.min(elapsed / segmentDuration, 1);
+    const from = points[currentSegment];
+    const to = points[currentSegment + 1];
+    const current = new THREE.Vector3().lerpVectors(from, to, t);
+    photon.position.copy(current);
+
+    beamLine.geometry.dispose();
+    beamLine.geometry = new THREE.BufferGeometry().setFromPoints([...drawnPoints, current]);
+
+    if (t >= 1) {
+      drawnPoints.push(to);
+      currentSegment++;
+      segmentStart = now;
+      if (currentSegment >= totalSegments) return;
+    }
+    requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+document.getElementById('runBtn').addEventListener('click', () => {
+  runTrace(document.getElementById('exprInput').value);
+});
+
+runTrace('out = (true AND false) OR true');
 
 const grid = new THREE.GridHelper(30, 30, 0x330033, 0x110011);
 scene.add(grid);
