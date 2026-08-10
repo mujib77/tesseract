@@ -12,7 +12,7 @@ class Parser {
 
   parseExpr() {
     let left = this.parseTerm();
-    while (this.peek() === 'OR') {
+    while (this.peek().toUpperCase() === 'OR')  {
       this.next();
       const right = this.parseTerm();
       left = { type: 'OR', left, right };
@@ -22,7 +22,7 @@ class Parser {
 
   parseTerm() {
     let left = this.parseFactor();
-    while (this.peek() === 'AND') {
+    while (this.peek().toUpperCase() === 'AND') {
       this.next();
       const right = this.parseFactor();
       left = { type: 'AND', left, right };
@@ -32,7 +32,7 @@ class Parser {
 
   parseFactor() {
     const tok = this.peek();
-    if (tok === 'NOT') {
+    if (tok.toUpperCase() === 'NOT') {
       this.next();
       return { type: 'NOT', left: this.parseFactor() };
     }
@@ -43,7 +43,7 @@ class Parser {
       return inner;
     }
     this.next();
-    return { type: 'VAR', value: tok === 'true' };
+    return { type: 'VAR', value: tok.toLowerCase() === 'true' };
   }
 }
 
