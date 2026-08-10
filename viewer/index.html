@@ -16,6 +16,15 @@
       }
     }
   </script>
+   <script src="logic.js"></script>
   <script type="module" src="main.js"></script>
+ 
+
+  <div style="position: fixed; top: 20px; left: 20px; z-index: 10; font-family: monospace;">
+  <input id="exprInput" type="text" value="out = (true AND false) OR true"
+    style="width: 400px; padding: 8px; background: #111; color: #0ff; border: 1px solid #0ff; font-family: monospace;">
+  <button id="runBtn" style="padding: 8px 16px; background: #0ff; color: #000; border: none; cursor: pointer;">Trace</button>
+  <div id="resultLabel" style="color: #0ff; margin-top: 8px;"></div>
+</div>
 </body>
 </html>
