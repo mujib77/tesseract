@@ -182,11 +182,13 @@ int main() {
     traceGate(false, true);
     traceGate(false, false);
 
-    std::cout << "\n=== Tracing geometry.json ===\n";
+std::cout << "\n=== Tracing geometry.json ===\n";
     std::vector<TransistorCube> cubes = loadGeometry("geometry.json");
     std::cout << "Loaded " << cubes.size() << " cubes\n";
 
     Ray traceBeam{ {0, 0, 0}, Vec3{1, 0, 0}.normalize() };
+    std::vector<Vec3> pathPoints;
+    pathPoints.push_back(traceBeam.origin);
 
     for (size_t i = 0; i < cubes.size(); i++) {
         double t = intersectTransistor(traceBeam, cubes[i]);
@@ -197,8 +199,22 @@ int main() {
         Vec3 hit = traceBeam.origin + traceBeam.direction * t;
         Vec3 newDir = reflect(traceBeam.direction, cubes[i].normal);
         std::cout << "Cube " << i << ": HIT at (" << hit.x << ", " << hit.y << ", " << hit.z << "), reflecting\n";
+        pathPoints.push_back(hit);
         traceBeam = { hit, newDir };
     }
 
+    Vec3 finalPoint = traceBeam.origin + traceBeam.direction * 5.0;
+    pathPoints.push_back(finalPoint);
+
+    std::ofstream traceOut("trace.json");
+    traceOut << "{\n  \"points\": [\n";
+    for (size_t i = 0; i < pathPoints.size(); i++) {
+        traceOut << "    [" << pathPoints[i].x << ", " << pathPoints[i].y << ", " << pathPoints[i].z << "]";
+        if (i != pathPoints.size() - 1) traceOut << ",";
+        traceOut << "\n";
+    }
+    traceOut << "  ]\n}\n";
+    traceOut.close();
+    std::cout << "\nTrace written to trace.json (" << pathPoints.size() << " points)\n";
     return 0;
 }
