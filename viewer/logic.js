@@ -21,14 +21,14 @@ class Parser {
   }
 
   parseTerm() {
-    let left = this.parseFactor();
-    while (this.peek().toUpperCase() === 'AND') {
-      this.next();
-      const right = this.parseFactor();
-      left = { type: 'AND', left, right };
-    }
-    return left;
+  let left = this.parseFactor();
+  while (this.peek().toUpperCase() === 'AND' || this.peek().toUpperCase() === 'XOR') {
+    const op = this.next().toUpperCase();
+    const right = this.parseFactor();
+    left = { type: op, left, right };
   }
+  return left;
+}
 
   parseFactor() {
     const tok = this.peek();
@@ -52,6 +52,7 @@ function evalNode(n) {
     case 'VAR': return n.value;
     case 'AND': return evalNode(n.left) && evalNode(n.right);
     case 'OR': return evalNode(n.left) || evalNode(n.right);
+    case 'XOR': return evalNode(n.left) !== evalNode(n.right);
     case 'NOT': return !evalNode(n.left);
   }
 }
@@ -75,7 +76,16 @@ function compileExpression(expr) {
       counter++;
       cubes.push({ point: [5, y + 5, 0], normal: [-1, -1, 0], state: evalNode(n.right) });
       counter++;
-    } else if (n.type === 'OR') {
+    }
+    
+    else if (n.type === 'XOR') {
+    walk(n.left);
+    walk(n.right);
+    const y = counter * 5;
+    cubes.push({ point: [5, y, 0], normal: [-1, 1, 0], state: evalNode(n.left) !== evalNode(n.right) });
+    counter++;
+}
+    else if (n.type === 'OR') {
       walk(n.left);
       walk(n.right);
       const y = counter * 5;
