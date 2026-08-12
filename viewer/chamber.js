@@ -56,13 +56,142 @@ const pulses = [];
 const componentMeshes = new Map();
 let cycleDuration = 1;
 let replayStart = 0;
+let cinematic = false;
+
+const buildQueue = [];
+let buildTarget = null;
+let chamberPhase = 'ready';
+let constructionStart = 0;
+let constructionDuration = 0;
+
+function addToChamber(object) {
+  (buildTarget ?? chamber).add(object);
+  return object;
+}
+
+function componentBuildTime(component) {
+  if (component.type === 'output_wall') return 5.1;
+  if (component.type === 'detector') return 5.6;
+
+  return 0.25 + Math.max(0, component.position[0] - 1) * 0.17 +
+    (component.type === 'full_adder' ? 0.16 : 0);
+}
+
+function wireBuildTime(segment) {
+  if (segment.end[0] >= 33) return 5.35;
+  return 0.45 + Math.max(segment.start[0], segment.end[0]) * 0.17;
+}
+
+function stageForConstruction(group, startTime) {
+  const items = [];
+
+  group.traverse(object => {
+    if (!object.isMesh && !object.isLine && !object.isSprite) return;
+
+    const materials = (Array.isArray(object.material)
+      ? object.material
+      : [object.material]
+    ).filter(Boolean).map(material => {
+      const opacity = material.opacity ?? 1;
+      material.transparent = true;
+      material.needsUpdate = true;
+      return { material, opacity };
+    });
+
+    items.push({
+      object,
+      baseScale: object.scale.clone(),
+      materials,
+    });
+  });
+
+  group.visible = false;
+
+  buildQueue.push({ group, startTime, items });
+
+  constructionDuration = Math.max(
+    constructionDuration,
+    startTime + 0.55,
+  );
+}
+
+function showAllBuildables() {
+  buildQueue.forEach(entry => {
+    entry.group.visible = true;
+
+    entry.items.forEach(item => {
+      item.object.scale.copy(item.baseScale);
+
+      item.materials.forEach(({ material, opacity }) => {
+        material.opacity = opacity;
+      });
+    });
+  });
+}
+
+function resetConstruction() {
+  buildQueue.forEach(entry => {
+    entry.group.visible = false;
+  });
+}
+
+function updateConstruction(elapsed) {
+  let completed = 0;
+
+  buildQueue.forEach(entry => {
+    const progress = THREE.MathUtils.clamp(
+      (elapsed - entry.startTime) / 0.55,
+      0,
+      1,
+    );
+
+    const ease = 1 - (1 - progress) ** 3;
+    entry.group.visible = progress > 0;
+
+    entry.items.forEach(item => {
+      item.object.scale
+        .copy(item.baseScale)
+        .multiplyScalar(0.64 + ease * 0.36);
+
+      item.materials.forEach(({ material, opacity }) => {
+        material.opacity = opacity * (0.08 + ease * 0.92);
+      });
+    });
+
+    if (progress === 1) completed++;
+  });
+
+  const percent = Math.round(
+    Math.min(elapsed / constructionDuration, 1) * 100,
+  );
+
+  document.getElementById('result').textContent =
+    `COMPILER / ASSEMBLING PHYSICAL CHAMBER ${percent}% ` +
+    `(${completed}/${buildQueue.length} MODULES)`;
+
+  return completed === buildQueue.length;
+}
+
+function beginCinematicConstruction(now) {
+  cinematic = true;
+  controls.enabled = false;
+  chamberPhase = 'building';
+  constructionStart = now;
+
+  resetConstruction();
+  frameChamber();
+
+  document.getElementById('result').textContent =
+    'COMPILER / MATERIALIZING PHYSICAL CHAMBER';
+}
+
 let finalReadout = '';
 let detectorCount = 0;
 
 function world(point) {
   return new THREE.Vector3(
     point[0] * 1.15,
-    0,
+    point[2] * 1.15,
     point[1] * 1.15,
   );
 }
@@ -90,7 +219,7 @@ function label(text, position, color, scale = 1) {
 
   sprite.position.copy(position);
   sprite.scale.set(3 * scale, 0.75 * scale, 1);
-  chamber.add(sprite);
+  addToChamber(sprite);
 }
 
 function componentGeometry(type) {
@@ -114,8 +243,59 @@ function componentColor(type) {
 }
 
 function addComponent(component) {
+  const group = new THREE.Group();
+  chamber.add(group);
+  buildTarget = group;
+
   const position = world(component.position);
   const color = componentColor(component.type);
+
+  if (component.type === 'output_wall') {
+    const wallPosition = position.clone();
+    wallPosition.y = 5.5;
+
+    const wall = new THREE.Mesh(
+      new THREE.BoxGeometry(1.5, 11.5, 2.2),
+      new THREE.MeshPhysicalMaterial({
+        color: 0x0b2c34,
+        emissive: 0x06222a,
+        emissiveIntensity: 0.35,
+        metalness: 0.5,
+        roughness: 0.14,
+        transparent: true,
+        opacity: 0.42,
+        transmission: 0.25,
+      }),
+    );
+
+    wall.position.copy(wallPosition);
+    addToChamber(wall);
+
+    const edges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(1.5, 11.5, 2.2)),
+      new THREE.LineBasicMaterial({
+        color: 0x00d9ff,
+        transparent: true,
+        opacity: 0.45,
+      }),
+    );
+
+    edges.position.copy(wallPosition);
+    addToChamber(edges);
+
+    label(
+      'OUTPUT DETECTOR WALL',
+      wallPosition.clone().add(new THREE.Vector3(0, 6.3, 0)),
+      '#68ff88',
+      0.75,
+    );
+
+    componentMeshes.set(component.name, wall);
+
+    buildTarget = null;
+    stageForConstruction(group, componentBuildTime(component));
+    return;
+  }
 
   const material = new THREE.MeshStandardMaterial({
     color,
@@ -133,7 +313,8 @@ function addComponent(component) {
   if (component.type === 'emitter') {
     mesh.rotation.z = Math.PI / 2;
   }
-    const plinth = new THREE.Mesh(
+
+  const plinth = new THREE.Mesh(
     new THREE.CylinderGeometry(0.92, 1.15, 0.14, 6),
     new THREE.MeshStandardMaterial({
       color: 0x07151c,
@@ -143,8 +324,8 @@ function addComponent(component) {
   );
 
   plinth.position.copy(position);
-  plinth.position.y = -0.72;
-  chamber.add(plinth);
+  plinth.position.y = position.y - 0.72;
+  addToChamber(plinth);
 
   const enclosure = new THREE.Mesh(
     new THREE.BoxGeometry(1.7, 1.45, 1.25),
@@ -159,7 +340,7 @@ function addComponent(component) {
   );
 
   enclosure.position.copy(position);
-  chamber.add(enclosure);
+  addToChamber(enclosure);
 
   const enclosureEdges = new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.BoxGeometry(1.7, 1.45, 1.25)),
@@ -171,8 +352,9 @@ function addComponent(component) {
   );
 
   enclosureEdges.position.copy(position);
-  chamber.add(enclosureEdges);
-  chamber.add(mesh);
+  addToChamber(enclosureEdges);
+
+  addToChamber(mesh);
   componentMeshes.set(component.name, mesh);
 
   const ring = new THREE.Mesh(
@@ -182,7 +364,7 @@ function addComponent(component) {
 
   ring.position.copy(position);
   ring.rotation.x = Math.PI / 2;
-  chamber.add(ring);
+  addToChamber(ring);
 
   label(
     component.name.replaceAll('_', ' '),
@@ -190,9 +372,16 @@ function addComponent(component) {
     `#${color.toString(16).padStart(6, '0')}`,
     0.58,
   );
+
+  buildTarget = null;
+  stageForConstruction(group, componentBuildTime(component));
 }
 
 function addWire(segment) {
+  const group = new THREE.Group();
+  chamber.add(group);
+  buildTarget = group;
+
   const start = world(segment.start);
   const end = world(segment.end);
   const color = new THREE.Color(segment.color);
@@ -213,7 +402,7 @@ function addWire(segment) {
     }),
   );
 
-  chamber.add(fibre);
+  addToChamber(fibre);
 
   const core = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints([start, end]),
@@ -224,30 +413,86 @@ function addWire(segment) {
     }),
   );
 
-  chamber.add(core);
+  addToChamber(core);
 
-  if (!segment.active) return;
+  if (segment.active) {
+    const photon = new THREE.Mesh(
+      new THREE.SphereGeometry(0.16, 16, 16),
+      new THREE.MeshBasicMaterial({ color }),
+    );
 
-  const photon = new THREE.Mesh(
-    new THREE.SphereGeometry(0.16, 16, 16),
-    new THREE.MeshBasicMaterial({ color }),
+    photon.visible = false;
+    addToChamber(photon);
+
+    pulses.push({
+      photon,
+      start,
+      end,
+      startTime: segment.startTime,
+      endTime: segment.endTime,
+    });
+  }
+
+  buildTarget = null;
+  stageForConstruction(group, wireBuildTime(segment));
+}
+
+function frameChamber() {
+  const bounds = new THREE.Box3().setFromObject(chamber);
+  const center = bounds.getCenter(new THREE.Vector3());
+  const size = bounds.getSize(new THREE.Vector3());
+  const span = Math.max(size.x, size.z);
+
+  controls.target.set(center.x, 3.5, center.z);
+
+  camera.position.set(
+    center.x - span * 0.18,
+    Math.max(11, span * 0.42),
+    center.z + Math.max(18, span * 0.9),
+  );
+}
+
+function updateCinematic(simulationTime, trace) {
+  const completedGates = trace.events
+    .filter(event =>
+      event.type === 'full_adder' &&
+      event.time <= simulationTime,
+    );
+
+  const finalDetectorTime = Math.max(
+    ...trace.detectors.map(detector => detector.time),
   );
 
-  photon.visible = false;
-  chamber.add(photon);
+  let focusName = completedGates.length > 0
+    ? completedGates.at(-1).name
+    : 'CARRY_IN';
 
-  pulses.push({
-    photon,
-    start,
-    end,
-    startTime: segment.startTime,
-    endTime: segment.endTime,
-  });
+  if (simulationTime >= finalDetectorTime - 0.65) {
+    focusName = 'READOUT_WALL';
+  }
+
+  const focusMesh = componentMeshes.get(focusName);
+  if (!focusMesh) return;
+
+  const target = focusMesh.position;
+
+  const finalReveal = focusName === 'READOUT_WALL';
+
+  const desiredCameraPosition = target.clone().add(
+    finalReveal
+      ? new THREE.Vector3(-8, 2.5, 9)
+      : new THREE.Vector3(-6, 4.5, 8),
+  );
+
+  camera.position.lerp(desiredCameraPosition, 0.045);
+  controls.target.lerp(target, 0.07);
 }
 
 function buildChamber(trace) {
   trace.components.forEach(addComponent);
   trace.segments.forEach(addWire);
+  showAllBuildables();
+  frameChamber();
 
   cycleDuration = Math.max(
     ...trace.detectors.map(detector => detector.time),
@@ -329,6 +574,10 @@ function update(simulationTime, trace) {
     completedDetectors === detectorCount
       ? finalReadout
       : `DETECTOR ARRAY / COLLECTING ${completedDetectors}/${detectorCount} SIGNALS`;
+
+       if (cinematic && chamberPhase === 'executing') {
+  updateCinematic(simulationTime, trace);
+}
 }
 
 fetch('adder_trace.json')
@@ -341,19 +590,41 @@ fetch('adder_trace.json')
 
     const clock = new THREE.Clock();
 
-    document.getElementById('replay').addEventListener('click', () => {
-      replayStart = clock.getElapsedTime();
-    });
+ document.getElementById('replay').addEventListener('click', () => {
+  cinematic = false;
+  controls.enabled = true;
+  chamberPhase = 'executing';
+  showAllBuildables();
+  replayStart = clock.getElapsedTime();
+});
 
-    function animate() {
-      requestAnimationFrame(animate);
+document.getElementById('cinematic').addEventListener('click', () => {
+  beginCinematicConstruction(clock.getElapsedTime());
+});
 
-      const elapsed = clock.getElapsedTime() - replayStart;
-      update(elapsed % cycleDuration, trace);
+function animate() {
+  requestAnimationFrame(animate);
 
-      controls.update();
-      composer.render();
+  const now = clock.getElapsedTime();
+
+  if (chamberPhase === 'building') {
+    const ready = updateConstruction(now - constructionStart);
+
+    if (ready) {
+      chamberPhase = 'executing';
+      replayStart = now;
+
+      document.getElementById('result').textContent =
+        'DETECTOR ARRAY / WAITING FOR LIGHT';
     }
+  } else {
+    const elapsed = now - replayStart;
+    update(elapsed % cycleDuration, trace);
+  }
+
+  controls.update();
+  composer.render();
+}
 
     animate();
   })
