@@ -263,6 +263,8 @@ int main(int argc, char* argv[]) {
         const Vec3 carryEmitter {1.0, 0.0, 0.0};
 
         addComponent("emitter", "CARRY_IN", carryEmitter);
+        const Vec3 outputWall {33.0, 0.0, 0.0};
+        addComponent("output_wall", "READOUT_WALL", outputWall);
 
         Signal carry {
             "CARRY_IN",
@@ -278,7 +280,11 @@ int main(int argc, char* argv[]) {
             const Vec3 aEmitter {x, 3.0, 0.0};
             const Vec3 bEmitter {x, -3.0, 0.0};
             const Vec3 fullAdderPosition {x, 0.0, 0.0};
-            const Vec3 sumDetector {x, -5.0, 0.0};
+            const Vec3 sumDetector {
+                  33.0,
+                  0.0,
+                  1.0 + bit * 1.1,
+               };
 
             const std::string suffix = std::to_string(bit);
 
@@ -320,7 +326,7 @@ int main(int argc, char* argv[]) {
             carry = output.carry;
         }
 
-        const Vec3 carryDetector {31.5, 0.0, 0.0};
+        const Vec3 carryDetector {33.0, 0.0, 10.0};
         addComponent("detector", "CARRY_OUT", carryDetector);
         detect(carry, "CARRY_OUT", carryDetector);
 
