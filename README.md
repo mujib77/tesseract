@@ -696,7 +696,7 @@ The Three.js dependency is loaded from a CDN.
 ### Clone
 
 ```bash
-git clone <your-repository-url>
+git clone https://github.com/mujib77/tesseract
 cd tesseract
 ```
 
