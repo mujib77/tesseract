@@ -54,6 +54,7 @@ scene.add(chamber);
 
 const pulses = [];
 const componentMeshes = new Map();
+const vaultGates = new Map();
 let cycleDuration = 1;
 let replayStart = 0;
 let cinematic = false;
@@ -72,13 +73,21 @@ function addToChamber(object) {
 function componentBuildTime(component) {
   if (component.type === 'output_wall') return 5.1;
   if (component.type === 'detector') return 5.6;
+  if (component.type === 'comparator') return 6.3;
+  if (component.type === 'optical_switch') return 7.0;
+  if (component.type === 'vault_gate') return 7.6;
+  if (component.type === 'branch_beacon') return 7.6;
 
   return 0.25 + Math.max(0, component.position[0] - 1) * 0.17 +
     (component.type === 'full_adder' ? 0.16 : 0);
 }
 
 function wireBuildTime(segment) {
+  if (segment.end[0] >= 47) return 7.8;
+  if (segment.end[0] >= 41) return 7.1;
+  if (segment.end[0] >= 37) return 6.4;
   if (segment.end[0] >= 33) return 5.35;
+
   return 0.45 + Math.max(segment.start[0], segment.end[0]) * 0.17;
 }
 
@@ -229,6 +238,9 @@ function componentGeometry(type) {
   if (type === 'xor_gate') return new THREE.OctahedronGeometry(0.82);
   if (type === 'and_gate') return new THREE.BoxGeometry(1.15, 0.9, 0.7);
   if (type === 'full_adder') return new THREE.BoxGeometry(2.2, 1.35, 1.5);
+  if (type === 'comparator') return new THREE.IcosahedronGeometry(0.92);
+  if (type === 'optical_switch') return new THREE.TorusKnotGeometry(0.52, 0.15, 80, 12);
+  if (type === 'branch_beacon') return new THREE.ConeGeometry(0.75, 1.5, 5);
   return new THREE.DodecahedronGeometry(0.8);
 }
 
@@ -239,6 +251,10 @@ function componentColor(type) {
   if (type === 'xor_gate') return 0xff35d3;
   if (type === 'and_gate') return 0x8d76ff;
   if (type === 'full_adder') return 0xff4fd8;
+  if (type === 'comparator') return 0xa882ff;
+  if (type === 'optical_switch') return 0xffc14d;
+  if (type === 'vault_gate') return 0x68ff88;
+  if (type === 'branch_beacon') return 0xff355f;
   return 0xcf7cff;
 }
 
@@ -249,6 +265,97 @@ function addComponent(component) {
 
   const position = world(component.position);
   const color = componentColor(component.type);
+  
+    if (component.type === 'vault_gate') {
+    const center = position.clone();
+    center.y += 1.65;
+
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 4.4, 4.2),
+      new THREE.MeshBasicMaterial({
+        color: 0x68ff88,
+        transparent: true,
+        opacity: 0.35,
+        wireframe: true,
+      }),
+    );
+
+    frame.position.copy(center);
+    addToChamber(frame);
+
+    const field = new THREE.Mesh(
+      new THREE.BoxGeometry(0.12, 3.3, 3.1),
+      new THREE.MeshBasicMaterial({
+        color: 0xff355f,
+        transparent: true,
+        opacity: 0.52,
+      }),
+    );
+
+    field.position.copy(center);
+    addToChamber(field);
+
+    const doorMaterial = new THREE.MeshStandardMaterial({
+      color: 0x1a0d22,
+      emissive: 0x210a28,
+      emissiveIntensity: 0.35,
+      metalness: 0.9,
+      roughness: 0.2,
+    });
+
+    const leftDoor = new THREE.Mesh(
+      new THREE.BoxGeometry(0.42, 3.4, 1.42),
+      doorMaterial.clone(),
+    );
+
+    const rightDoor = new THREE.Mesh(
+      new THREE.BoxGeometry(0.42, 3.4, 1.42),
+      doorMaterial.clone(),
+    );
+
+    leftDoor.position.copy(center);
+    rightDoor.position.copy(center);
+    leftDoor.position.z -= 0.78;
+    rightDoor.position.z += 0.78;
+
+    addToChamber(leftDoor);
+    addToChamber(rightDoor);
+
+    const core = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.3),
+      new THREE.MeshStandardMaterial({
+        color: 0x68ff88,
+        emissive: 0x68ff88,
+        emissiveIntensity: 0.15,
+        metalness: 0.5,
+        roughness: 0.2,
+      }),
+    );
+
+    core.position.copy(center);
+    addToChamber(core);
+
+    label(
+      'VAULT / TRUE PATH',
+      center.clone().add(new THREE.Vector3(0, 2.8, 0)),
+      '#68ff88',
+      0.72,
+    );
+
+    componentMeshes.set(component.name, core);
+
+    vaultGates.set(component.name, {
+      leftDoor,
+      rightDoor,
+      field,
+      leftClosedZ: leftDoor.position.z,
+      rightClosedZ: rightDoor.position.z,
+    });
+
+    buildTarget = null;
+    stageForConstruction(group, componentBuildTime(component));
+    return;
+  }
 
   if (component.type === 'output_wall') {
     const wallPosition = position.clone();
@@ -453,50 +560,79 @@ function frameChamber() {
 }
 
 function updateCinematic(simulationTime, trace) {
-  const completedGates = trace.events
-    .filter(event =>
-      event.type === 'full_adder' &&
-      event.time <= simulationTime,
-    );
-
-  const finalDetectorTime = Math.max(
+  const lastDetectorTime = Math.max(
     ...trace.detectors.map(detector => detector.time),
   );
 
-  let focusName = completedGates.length > 0
-    ? completedGates.at(-1).name
+  const completedAdders = trace.events.filter(event =>
+    event.type === 'full_adder' &&
+    event.time <= simulationTime,
+  );
+
+  const comparator = trace.events.find(event =>
+    event.type === 'comparator',
+  );
+
+  const router = trace.events.find(event =>
+    event.type === 'optical_switch',
+  );
+
+  const activeActuator = trace.events.find(event =>
+    event.type === 'actuator' && event.value,
+  );
+
+  let focusName = completedAdders.length > 0
+    ? completedAdders.at(-1).name
     : 'CARRY_IN';
 
-  if (simulationTime >= finalDetectorTime - 0.65) {
+  if (simulationTime >= lastDetectorTime - 0.65) {
     focusName = 'READOUT_WALL';
+  }
+
+  if (comparator && simulationTime >= comparator.time - 0.35) {
+    focusName = comparator.name;
+  }
+
+  if (router && simulationTime >= router.time - 0.25) {
+    focusName = router.name;
+  }
+
+  if (activeActuator && simulationTime >= activeActuator.time - 0.25) {
+    focusName = activeActuator.name;
   }
 
   const focusMesh = componentMeshes.get(focusName);
   if (!focusMesh) return;
 
-  const target = focusMesh.position;
+  const finalGate = focusName === 'VAULT_GATE' ||
+    focusName === 'LOCKED_EXIT';
 
-  const finalReveal = focusName === 'READOUT_WALL';
-
-  const desiredCameraPosition = target.clone().add(
-    finalReveal
-      ? new THREE.Vector3(-8, 2.5, 9)
+  const desiredCameraPosition = focusMesh.position.clone().add(
+    finalGate
+      ? new THREE.Vector3(-8, 4.5, 10)
       : new THREE.Vector3(-6, 4.5, 8),
   );
 
   camera.position.lerp(desiredCameraPosition, 0.045);
-  controls.target.lerp(target, 0.07);
+  controls.target.lerp(focusMesh.position, 0.07);
 }
 
 function buildChamber(trace) {
+  document.getElementById('program').textContent =
+  `PROGRAM / ${trace.program?.source ?? trace.title}`;
   trace.components.forEach(addComponent);
   trace.segments.forEach(addWire);
   showAllBuildables();
   frameChamber();
 
-  cycleDuration = Math.max(
-    ...trace.detectors.map(detector => detector.time),
-  ) + 1.2;
+  const finalTraceTime = Math.max(
+  0,
+  ...trace.detectors.map(detector => detector.time),
+  ...trace.events.map(event => event.time),
+  ...trace.segments.map(segment => segment.endTime),
+);
+
+cycleDuration = finalTraceTime + 1.5;
 
     const sumDetectors = trace.detectors
     .filter(detector =>
@@ -538,11 +674,65 @@ function buildChamber(trace) {
   document.getElementById('input').textContent =
     `INPUT PACKET / A:${trace.inputs.a} B:${trace.inputs.b} CIN:${Number(trace.inputs.carryIn ?? false)}`;
 
-finalReadout = `DETECTOR ARRAY / ${binary}₂ = ${decimal}`;
+finalReadout = `DETECTOR ARRAY / ${binary} BASE-2 = ${decimal}`;
 detectorCount = trace.detectors.length;
 
 document.getElementById('result').textContent =
   'DETECTOR ARRAY / WAITING FOR LIGHT';
+}
+
+function updateVaultGates(simulationTime, trace) {
+  vaultGates.forEach((gate, name) => {
+    const event = trace.events.find(candidate =>
+      candidate.type === 'actuator' &&
+      candidate.name === name,
+    );
+
+    const open = event?.value
+      ? THREE.MathUtils.clamp((simulationTime - event.time) / 0.9, 0, 1)
+      : 0;
+
+    gate.leftDoor.position.z = gate.leftClosedZ - open * 1.7;
+    gate.rightDoor.position.z = gate.rightClosedZ + open * 1.7;
+    gate.field.material.opacity = 0.52 * (1 - open);
+  });
+}
+
+function updateControlReadout(simulationTime, trace) {
+  const comparator = trace.events.find(event =>
+    event.type === 'comparator',
+  );
+
+  const router = trace.events.find(event =>
+    event.type === 'optical_switch',
+  );
+
+  const actuator = trace.events.find(event =>
+    event.type === 'actuator' && event.value,
+  );
+
+  const control = document.getElementById('control');
+
+  if (!comparator || simulationTime < comparator.time) {
+    control.textContent = 'CONTROL FLOW / ANALYZING DETECTOR WORD';
+    return;
+  }
+
+  if (!router || simulationTime < router.time) {
+    control.textContent = comparator.value
+      ? 'CONTROL FLOW / CONDITION TRUE'
+      : 'CONTROL FLOW / CONDITION FALSE';
+    return;
+  }
+
+  if (!actuator || simulationTime < actuator.time) {
+    control.textContent = 'CONTROL FLOW / ROUTING LIGHT';
+    return;
+  }
+
+  control.textContent = actuator.name === 'VAULT_GATE'
+    ? 'CONTROL FLOW / TRUE PATH — VAULT UNLOCKED'
+    : 'CONTROL FLOW / FALSE PATH — ACCESS DENIED';
 }
 
 function update(simulationTime, trace) {
@@ -574,6 +764,9 @@ function update(simulationTime, trace) {
     completedDetectors === detectorCount
       ? finalReadout
       : `DETECTOR ARRAY / COLLECTING ${completedDetectors}/${detectorCount} SIGNALS`;
+
+      updateVaultGates(simulationTime, trace);
+      updateControlReadout(simulationTime, trace);
 
        if (cinematic && chamberPhase === 'executing') {
   updateCinematic(simulationTime, trace);
