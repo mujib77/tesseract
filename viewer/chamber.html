@@ -8,6 +8,7 @@
     canvas { display: block; }
 
     #hud {
+      
       position: fixed;
       top: 22px;
       left: 22px;
@@ -30,6 +31,19 @@
       margin-top: 8px;
     }
 
+    #program {
+  color: #d9b8ff;
+  margin-bottom: 8px;
+  max-width: 680px;
+  letter-spacing: 0.03em;
+  text-transform: none;
+}
+
+    #control {
+  color: #ffca68;
+  margin-top: 8px;
+  }
+
     button {
       margin-top: 14px;
       padding: 9px 14px;
@@ -44,8 +58,10 @@
 <body>
   <div id="hud">
     <div id="title">TESSERACT / EXECUTION CHAMBER</div>
+    <div id="program">Awaiting compiler…</div>
     <div id="input">Loading optical program…</div>
     <div id="result"></div>
+    <div id="control"></div>
     <button id="replay">REPLAY LIGHT</button>
     <button id="cinematic">CINEMATIC RUN</button>
   </div>
