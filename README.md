@@ -20,6 +20,12 @@ The goal is simple:
 
 ---
 
+## Demo
+
+**[▶ Watch the demo](https://github.com/mujib77/tesseract/releases/download/v0.1.0/demo.mp4)**
+
+---
+
 ## The idea
 
 Most programming languages eventually turn your code into something that a computer can execute.
